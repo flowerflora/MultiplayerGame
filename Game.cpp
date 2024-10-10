@@ -29,7 +29,7 @@ void Player::Controls::send_controls_message(Connection *connection_) const {
 	send_button(right);
 	send_button(up);
 	send_button(down);
-	send_button(jump);
+	send_button(ink);
 }
 
 bool Player::Controls::recv_controls_message(Connection *connection_) {
@@ -63,7 +63,7 @@ bool Player::Controls::recv_controls_message(Connection *connection_) {
 	recv_button(recv_buffer[4+1], &right);
 	recv_button(recv_buffer[4+2], &up);
 	recv_button(recv_buffer[4+3], &down);
-	recv_button(recv_buffer[4+4], &jump);
+	recv_button(recv_buffer[4+4], &ink);
 
 	//delete message from buffer:
 	recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + 4 + size);
@@ -82,15 +82,8 @@ Player *Game::spawn_player() {
 	Player &player = players.back();
 
 	//random point in the middle area of the arena:
-	player.position.x = glm::mix(ArenaMin.x + 2.0f * PlayerRadius, ArenaMax.x - 2.0f * PlayerRadius, 0.4f + 0.2f * mt() / float(mt.max()));
-	player.position.y = glm::mix(ArenaMin.y + 2.0f * PlayerRadius, ArenaMax.y - 2.0f * PlayerRadius, 0.4f + 0.2f * mt() / float(mt.max()));
-
-	do {
-		player.color.r = mt() / float(mt.max());
-		player.color.g = mt() / float(mt.max());
-		player.color.b = mt() / float(mt.max());
-	} while (player.color == glm::vec3(0.0f));
-	player.color = glm::normalize(player.color);
+	player.position.x = std::rand()%int(ArenaMax.x-ArenaMin.x- 2.0f * PlayerRadius) - ArenaMax.x + PlayerRadius;
+	player.position.y = std::rand()%int(ArenaMax.y-ArenaMin.y- 2.0f * PlayerRadius) - ArenaMax.y + PlayerRadius;
 
 	player.name = "Player " + std::to_string(next_player_number++);
 
@@ -112,6 +105,7 @@ void Game::remove_player(Player *player) {
 void Game::update(float elapsed) {
 	//position/velocity update:
 	for (auto &p : players) {
+		p.cooldown=std::max(p.cooldown-elapsed,0.0f);
 		glm::vec2 dir = glm::vec2(0.0f, 0.0f);
 		if (p.controls.left.pressed) dir.x -= 1.0f;
 		if (p.controls.right.pressed) dir.x += 1.0f;
@@ -142,34 +136,45 @@ void Game::update(float elapsed) {
 		}
 		p.position += p.velocity * elapsed;
 
+		// check for inked
+		if (p.controls.ink.pressed && p.cooldown==0.0f){
+		for (auto &p1 : players) {
+			if (&p1 == &p) continue;
+			// printf("INKING %f %f\n",(p1.position - p.position).x,(p1.position - p.position).y);
+			if (glm::length(p1.position - p.position)<=3.5f){
+				p1.inked = true;
+				p1.collected = std::max(0u,p1.collected-5);
+				printf("INKED\n");
+			}
+		}
+		p.cooldown = 10.0f;
+		}
+
+		// checked for collection
+		for (size_t i = 0; i< shells.size();i++){
+			if (glm::length(shells[i] - p.position)<=2.0f){
+				// move the shell
+				shells[i] = glm::vec2(std::rand()%int(ArenaMax.x-ArenaMin.x- 2.0f) - ArenaMax.x,std::rand()%int(ArenaMax.y-ArenaMin.y) - ArenaMax.y);
+				// printf("collected! new pos: %f %f\n",shells[i].x,shells[i].y);
+				p.collected++;
+			}
+		}
+
 		//reset 'downs' since controls have been handled:
 		p.controls.left.downs = 0;
 		p.controls.right.downs = 0;
 		p.controls.up.downs = 0;
 		p.controls.down.downs = 0;
-		p.controls.jump.downs = 0;
+		p.controls.ink.downs = 0;
 	}
 
 	//collision resolution:
 	for (auto &p1 : players) {
-		//player/player collisions:
-		for (auto &p2 : players) {
-			if (&p1 == &p2) break;
-			glm::vec2 p12 = p2.position - p1.position;
-			float len2 = glm::length2(p12);
-			if (len2 > (2.0f * PlayerRadius) * (2.0f * PlayerRadius)) continue;
-			if (len2 == 0.0f) continue;
-			glm::vec2 dir = p12 / std::sqrt(len2);
-			//mirror velocity to be in separating direction:
-			glm::vec2 v12 = p2.velocity - p1.velocity;
-			glm::vec2 delta_v12 = dir * glm::max(0.0f, -1.75f * glm::dot(dir, v12));
-			p2.velocity += 0.5f * delta_v12;
-			p1.velocity -= 0.5f * delta_v12;
-		}
 		//player/arena collisions:
 		if (p1.position.x < ArenaMin.x + PlayerRadius) {
 			p1.position.x = ArenaMin.x + PlayerRadius;
 			p1.velocity.x = std::abs(p1.velocity.x);
+			// printf("why %f %f\n",p1.position.x,p1.velocity.x);
 		}
 		if (p1.position.x > ArenaMax.x - PlayerRadius) {
 			p1.position.x = ArenaMax.x - PlayerRadius;
@@ -204,7 +209,12 @@ void Game::send_state_message(Connection *connection_, Player *connection_player
 	auto send_player = [&](Player const &player) {
 		connection.send(player.position);
 		connection.send(player.velocity);
-		connection.send(player.color);
+		connection.send(player.inked);
+		connection.send(player.collected);
+		for (auto shell : shells){
+			connection.send(shell);
+		}
+		
 	
 		//NOTE: can't just 'send(name)' because player.name is not plain-old-data type.
 		//effectively: truncates player name to 255 chars
@@ -259,7 +269,12 @@ bool Game::recv_state_message(Connection *connection_) {
 		Player &player = players.back();
 		read(&player.position);
 		read(&player.velocity);
-		read(&player.color);
+		read(&player.inked);
+		read(&player.collected);
+		for (size_t i = 0;i<5;i++){
+			read(&shells[i]);
+		}
+		
 		uint8_t name_len;
 		read(&name_len);
 		//n.b. would probably be more efficient to directly copy from recv_buffer, but I think this is clearer:

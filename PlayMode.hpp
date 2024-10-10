@@ -1,4 +1,5 @@
 #include "Mode.hpp"
+#include "Scene.hpp"
 
 #include "Connection.hpp"
 #include "Game.hpp"
@@ -30,5 +31,12 @@ struct PlayMode : Mode {
 
 	//connection to server:
 	Client &client;
+
+	Scene scene;
+	//camera:
+	Scene::Camera *camera = nullptr;
+	Scene::Transform* playerocto;
+	std::vector<Scene::Transform*> shells;
+	size_t lastdrawable;
 
 };
