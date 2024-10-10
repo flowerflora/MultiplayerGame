@@ -143,7 +143,7 @@ void Game::update(float elapsed) {
 			// printf("INKING %f %f\n",(p1.position - p.position).x,(p1.position - p.position).y);
 			if (glm::length(p1.position - p.position)<=3.5f){
 				p1.inked = true;
-				p1.collected = std::max(0u,p1.collected-5);
+				p1.collected = std::max(0,p1.collected-5);
 				printf("INKED\n");
 			}
 		}

@@ -44,7 +44,7 @@ struct Player {
 
 	std::string name = "";
 	float inked = 0.0f;
-	uint32_t collected = 0;
+	int collected = 0;
 	float cooldown = 5.0f;
 };
 
